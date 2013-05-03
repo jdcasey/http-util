@@ -1,7 +1,9 @@
-package org.commonjava.util.http.ssl.impl;
+package org.commonjava.util.http.ssl.path;
 
-import static org.commonjava.util.http.util.SSLUtils.loadDefaultKeystore;
-import static org.commonjava.util.http.util.SSLUtils.readCerts;
+import static org.commonjava.util.http.ssl.SSLUtils.getDefaultKeyManager;
+import static org.commonjava.util.http.ssl.SSLUtils.getDefaultTrustManager;
+import static org.commonjava.util.http.ssl.SSLUtils.loadDefaultKeystore;
+import static org.commonjava.util.http.ssl.SSLUtils.readCerts;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -11,7 +13,6 @@ import java.net.URL;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
-import java.security.UnrecoverableKeyException;
 import java.security.cert.CertificateException;
 import java.util.Collections;
 import java.util.Enumeration;
@@ -19,22 +20,17 @@ import java.util.List;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 
-import javax.enterprise.inject.Alternative;
-import javax.net.ssl.KeyManager;
-import javax.net.ssl.KeyManagerFactory;
+import javax.enterprise.context.ApplicationScoped;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509KeyManager;
 import javax.net.ssl.X509TrustManager;
 
+import org.apache.http.auth.AuthScope;
 import org.commonjava.util.http.HTTPException;
-import org.commonjava.util.http.ssl.SSLResourceLoader;
-import org.commonjava.util.http.ssl.conf.KeyConfig;
-import org.commonjava.util.http.ssl.conf.TrustConfig;
 
-@Alternative
+@ApplicationScoped
 public class PathSSLResourceLoader
-    implements SSLResourceLoader
 {
     private static final String CLASSPATH_PREFIX = "classpath:";
 
@@ -49,46 +45,17 @@ public class PathSSLResourceLoader
         this.path = path;
     }
 
-    @Override
     public KeyConfig getKeyConfig()
         throws HTTPException
     {
         // TODO: Load key PEM files somehow...not sure about passwords for keys, though.
         //        final String basedir = new File( path, CLIENT_SUBPATH ).getPath();
         final KeyStore ks = loadDefaultKeystore();
-
-        KeyManagerFactory kmf;
-        try
-        {
-            kmf = KeyManagerFactory.getInstance( KeyManagerFactory.getDefaultAlgorithm() );
-            kmf.init( ks, null );
-        }
-        catch ( final NoSuchAlgorithmException e )
-        {
-            throw new HTTPException( "Cannot initialize KeyManagerFactory: %s", e, e.getMessage() );
-        }
-        catch ( final UnrecoverableKeyException e )
-        {
-            throw new HTTPException( "Cannot initialize KeyManagerFactory: %s", e, e.getMessage() );
-        }
-        catch ( final KeyStoreException e )
-        {
-            throw new HTTPException( "Cannot initialize KeyManagerFactory: %s", e, e.getMessage() );
-        }
-
-        X509KeyManager km = null;
-        for ( final KeyManager keyManager : kmf.getKeyManagers() )
-        {
-            if ( keyManager instanceof X509KeyManager )
-            {
-                km = (X509KeyManager) keyManager;
-            }
-        }
+        final X509KeyManager km = getDefaultKeyManager();
 
         return new KeyConfig( ks, new MultiKeyManager( km ) );
     }
 
-    @Override
     public TrustConfig getTrustConfig()
         throws HTTPException
     {
@@ -118,30 +85,7 @@ public class PathSSLResourceLoader
             }
         }
 
-        TrustManagerFactory dtmf;
-        try
-        {
-            dtmf = TrustManagerFactory.getInstance( TrustManagerFactory.getDefaultAlgorithm() );
-            dtmf.init( (KeyStore) null );
-        }
-        catch ( final NoSuchAlgorithmException e )
-        {
-            throw new HTTPException( "Failed to initialize default trust-store: %s", e, e.getMessage() );
-        }
-        catch ( final KeyStoreException e )
-        {
-            throw new HTTPException( "Failed to initialize default trust-store: %s", e, e.getMessage() );
-        }
-
-        X509TrustManager dtm = null;
-        for ( final TrustManager ctm : dtmf.getTrustManagers() )
-        {
-            if ( ctm instanceof X509TrustManager )
-            {
-                dtm = (X509TrustManager) ctm;
-                break;
-            }
-        }
+        final X509TrustManager dtm = getDefaultTrustManager();
 
         try
         {
@@ -219,10 +163,11 @@ public class PathSSLResourceLoader
         if ( f.exists() && f.isFile() )
         {
             InputStream is = null;
+            final AuthScope scope = getAuthScope( f.getName() );
             try
             {
                 is = new FileInputStream( f );
-                readCerts( is, f.getName(), ks );
+                readCerts( scope, is, ks );
             }
             catch ( final CertificateException e )
             {
@@ -282,13 +227,20 @@ public class PathSSLResourceLoader
             final List<JarEntry> entries = Collections.list( jf.entries() );
             for ( final JarEntry entry : entries )
             {
+                if ( entry.isDirectory() )
+                {
+                    continue;
+                }
+
                 final String name = entry.getName();
                 if ( name.startsWith( basepath ) )
                 {
                     final InputStream is = jf.getInputStream( entry );
+                    final AuthScope scope = getAuthScope( name );
+
                     try
                     {
-                        readCerts( is, new File( name ).getName(), ks );
+                        readCerts( scope, is, ks );
                     }
                     catch ( final CertificateException e )
                     {
@@ -328,6 +280,27 @@ public class PathSSLResourceLoader
         {
             throw new HTTPException( "Failed to open classpath jar: %s. Reason: %s", e, jar, e.getMessage() );
         }
+    }
+
+    private static AuthScope getAuthScope( final String name )
+    {
+        final String fname = new File( name ).getName();
+        AuthScope scope = null;
+        if ( fname.indexOf( '_' ) > -1 )
+        {
+            final String[] parts = fname.split( "_" );
+            if ( parts.length > 1 && parts[1].matches( "\\d+" ) )
+            {
+                scope = new AuthScope( parts[0], Integer.parseInt( parts[1] ) );
+            }
+        }
+
+        if ( scope == null )
+        {
+            scope = new AuthScope( fname, 443 );
+        }
+
+        return scope;
     }
 
 }

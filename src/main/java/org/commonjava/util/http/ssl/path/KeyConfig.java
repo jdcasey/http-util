@@ -1,4 +1,4 @@
-package org.commonjava.util.http.ssl.conf;
+package org.commonjava.util.http.ssl.path;
 
 import java.security.KeyStore;
 

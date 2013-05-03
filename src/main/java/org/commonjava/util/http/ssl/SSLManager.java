@@ -4,70 +4,39 @@ import java.security.KeyManagementException;
 import java.security.NoSuchAlgorithmException;
 
 import javax.enterprise.context.ApplicationScoped;
+import javax.enterprise.inject.Default;
+import javax.enterprise.inject.Produces;
 import javax.inject.Inject;
 import javax.net.ssl.KeyManager;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 
 import org.apache.http.conn.ssl.SSLSocketFactory;
-import org.apache.http.conn.ssl.X509HostnameVerifier;
 import org.commonjava.util.http.HTTPException;
-import org.commonjava.util.http.ssl.conf.KeyConfig;
-import org.commonjava.util.http.ssl.conf.TrustConfig;
 
 @ApplicationScoped
 public class SSLManager
 {
 
     @Inject
-    private SSLResourceLoader loader;
+    private SSLProvider builder;
 
-    @Inject
-    private X509HostnameVerifier verifier = SSLSocketFactory.BROWSER_COMPATIBLE_HOSTNAME_VERIFIER;
-
-    @Inject
-    private SSLSocketFactoryBuilder builder;
+    private SSLSocketFactory factory;
 
     public SSLManager()
     {
     }
 
-    public SSLManager( final SSLResourceLoader loader, final SSLSocketFactoryBuilder builder )
+    public SSLManager( final SSLProvider builder )
     {
-        this.loader = loader;
         this.builder = builder;
-    }
-
-    public SSLManager( final SSLResourceLoader loader, final SSLSocketFactoryBuilder builder,
-                       final X509HostnameVerifier verifier )
-    {
-        this.loader = loader;
-        this.builder = builder;
-        this.verifier = verifier;
     }
 
     public SSLSocketFactory setupSSL()
         throws HTTPException
     {
-        final KeyConfig kc = loader.getKeyConfig();
-        final TrustConfig tc = loader.getTrustConfig();
+        final SSLSocketFactory factory = getSSLSocketFactory();
 
-        setSSLContext( kc, tc );
-        return builder.build( kc, tc, verifier );
-    }
-
-    public void setSSLContext( final String basedir )
-        throws HTTPException
-    {
-        final KeyConfig kc = loader.getKeyConfig();
-        final TrustConfig tc = loader.getTrustConfig();
-
-        setSSLContext( kc, tc );
-    }
-
-    private void setSSLContext( final KeyConfig kc, final TrustConfig tc )
-        throws HTTPException
-    {
         SSLContext ctx;
         try
         {
@@ -80,7 +49,8 @@ public class SSLManager
 
         try
         {
-            ctx.init( new KeyManager[] { kc.getKeyManager() }, new TrustManager[] { tc.getTrustManager() }, null );
+            ctx.init( new KeyManager[] { builder.getKeyManager() }, new TrustManager[] { builder.getTrustManager() },
+                      null );
         }
         catch ( final KeyManagementException e )
         {
@@ -89,14 +59,20 @@ public class SSLManager
         }
 
         SSLContext.setDefault( ctx );
+
+        return factory;
     }
 
-    public SSLSocketFactory newSSLSocketFactory()
+    @Produces
+    @Default
+    public synchronized SSLSocketFactory getSSLSocketFactory()
         throws HTTPException
     {
-        final KeyConfig kc = loader.getKeyConfig();
-        final TrustConfig tc = loader.getTrustConfig();
+        if ( factory == null )
+        {
+            factory = builder.build();
+        }
 
-        return builder.build( kc, tc, verifier );
+        return factory;
     }
 }

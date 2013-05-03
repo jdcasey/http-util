@@ -1,4 +1,4 @@
-package org.commonjava.util.http.ssl.impl;
+package org.commonjava.util.http.ssl.path;
 
 import java.net.Socket;
 import java.security.Principal;
